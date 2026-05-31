@@ -29,12 +29,25 @@ Code session with its own state, permission mode, and model.
 
 ## Screenshots
 
-> _TODO: add screenshots/GIFs here._
->
-> ```
-> docs/screenshot-dashboard.png   ← multi-tab dashboard
-> docs/screenshot-sandbox.png     ← WSL sandbox chip + approval modal
-> ```
+**Dashboard — external sessions, tracked live.** Claude Code sessions started in
+a terminal show up automatically; open them read-only or **Take Over** to adopt
+one as a managed tab.
+
+![Dashboard tracking external live sessions](docs/dashboard-external.png)
+
+**A session in a sandboxed WSL tab.** The green `🔒 SANDBOXED` chip means tool
+calls run inside bubblewrap; the input bar takes `/` commands and `!` shell lines.
+
+![Sandboxed session view with tabs](docs/session-sandboxed.png)
+
+**New session.** Pick a host, working directory, permission mode, model, and an
+initial prompt.
+
+![New session modal](docs/new-session.png)
+
+**Resume existing.** Search and reopen any past Claude Code session.
+
+![Resume existing session picker](docs/resume-sessions.png)
 
 ## Requirements
 
