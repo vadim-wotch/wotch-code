@@ -23,7 +23,10 @@ const sessions = new SessionManager(runnerScript)
 let mainWindow: BrowserWindow | null = null
 
 const externalTracker = new ExternalSessionTracker({
-  getWebContents: () => mainWindow?.webContents ?? null,
+  // Accessing `.webContents` on a destroyed window throws ("Object has been
+  // destroyed"); `?.` only guards null, so check isDestroyed() first. This is
+  // hit during quit, when disable() broadcasts after the window is torn down.
+  getWebContents: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null),
   getManagedSessionIds: () => sessions.getManagedSessionIds()
 })
 
