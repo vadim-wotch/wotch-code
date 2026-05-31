@@ -1,0 +1,17 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+
+# Secrets / credentials (defense-in-depth — none are committed)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+.npmrc
+
+# Claude Code local-machine settings (per-user)
+.claude/settings.local.json
