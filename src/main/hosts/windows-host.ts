@@ -41,7 +41,7 @@ export const windowsHost: HostAdapter = {
     const env = {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'wotch-code/0.4.0',
+      CLAUDE_AGENT_SDK_CLIENT_APP: 'wotch-code/0.4.1',
       ...opts.env
     }
     return spawn(process.execPath, [opts.runnerScript], {

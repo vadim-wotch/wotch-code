@@ -1,6 +1,6 @@
 {
   "name": "wotch-code",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Multi-session Claude Code orchestrator",
   "main": "./out/main/index.js",
   "author": "Vadim Albarov",

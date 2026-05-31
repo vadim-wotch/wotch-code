@@ -209,7 +209,7 @@ export const wslHost: HostAdapter = {
     // process without polluting the parent env or threading WSLENV.
     const envArgs = [
       `CLAUDE_CONFIG_DIR=${sharedClaudeDir}`,
-      'CLAUDE_AGENT_SDK_CLIENT_APP=wotch-code/0.4.0',
+      'CLAUDE_AGENT_SDK_CLIENT_APP=wotch-code/0.4.1',
       ...Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`)
     ]
     const args = [
