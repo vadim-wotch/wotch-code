@@ -34,6 +34,32 @@ export default function ExternalCard({ info, onTakenOver }: Props): React.JSX.El
 
   const displayName = info.customTitle || info.summary || info.firstPrompt || 'External session'
 
+  // Attention (from the Notification hook) takes visual priority over live/recent.
+  const accent =
+    info.attention === 'permission'
+      ? 'var(--warn)'
+      : info.attention === 'idle'
+        ? 'var(--ok)'
+        : info.live
+          ? 'var(--accent)'
+          : 'var(--text-mute)'
+  const pillClass =
+    info.attention === 'permission'
+      ? 'pill--warn'
+      : info.attention === 'idle'
+        ? 'pill--ok'
+        : info.live
+          ? 'pill--info'
+          : 'pill--mute'
+  const pillText =
+    info.attention === 'permission'
+      ? 'needs input'
+      : info.attention === 'idle'
+        ? 'your turn'
+        : info.live
+          ? 'external · live'
+          : 'external · recent'
+
   const takeOver = async (): Promise<void> => {
     setWorking(true)
     setError(null)
@@ -66,21 +92,16 @@ export default function ExternalCard({ info, onTakenOver }: Props): React.JSX.El
           openDetail(info.sessionId)
         }
       }}
-      style={{ borderTopColor: info.live ? 'var(--accent)' : 'var(--line)' }}
+      style={{ borderTopColor: accent }}
     >
       <div className="card__head">
         <div className="card__title">
-          <span
-            className="card__dot"
-            style={{ background: info.live ? 'var(--accent)' : 'var(--text-mute)' }}
-          />
+          <span className="card__dot" style={{ background: accent }} />
           <span className="card__name" title={displayName}>
             {displayName}
           </span>
         </div>
-        <span className={`pill ${info.live ? 'pill--info' : 'pill--mute'}`}>
-          {info.live ? 'external · live' : 'external · recent'}
-        </span>
+        <span className={`pill ${pillClass}`}>{pillText}</span>
       </div>
 
       <div className="card__meta">

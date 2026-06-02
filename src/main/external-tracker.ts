@@ -11,6 +11,7 @@ import {
   type TabEvent
 } from '../shared/protocol'
 import { getHost, listHosts } from './hosts'
+import { NOTIFICATIONS_LOG, WOTCH_DIR } from './notification-hook'
 
 /**
  * Scans ~/.claude/projects/* for session JSONL files this app didn't spawn,
@@ -81,11 +82,26 @@ export interface ExternalTrackerDeps {
   getManagedSessionIds: () => Set<string>
 }
 
+/** Records the latest Claude Code Notification per session, keyed by sessionId.
+ *  Written by the bundled notify-hook helper (see notification-hook.ts) and
+ *  tailed here to mark sessions that are blocked on the user. */
+interface NotifRecord {
+  type: 'permission' | 'idle'
+  ts: number
+}
+/** Compact the notifications log once it grows past this — it's append-only, so
+ *  a long-lived install would otherwise grow without bound. */
+const NOTIF_LOG_COMPACT_BYTES = 256 * 1024
+
 export class ExternalSessionTracker {
   private entries = new Map<string, ExternalEntry>()
   private enabled = false
   private refreshTimer?: NodeJS.Timeout
   private rescanInFlight = false
+  /** Latest notification per sessionId, rebuilt from the on-disk log. */
+  private notifBySession = new Map<string, NotifRecord>()
+  private notifWatcher?: FSWatcher
+  private notifDebounce?: NodeJS.Timeout
 
   constructor(private deps: ExternalTrackerDeps) {}
 
@@ -100,6 +116,8 @@ export class ExternalSessionTracker {
   async enable(): Promise<void> {
     if (this.enabled) return
     this.enabled = true
+    await this.refreshNotifications()
+    this.openNotifWatcher()
     await this.rescan()
     this.refreshTimer = setInterval(() => {
       void this.rescan()
@@ -113,6 +131,8 @@ export class ExternalSessionTracker {
       clearInterval(this.refreshTimer)
       this.refreshTimer = undefined
     }
+    this.closeNotifWatcher()
+    this.notifBySession.clear()
     for (const e of this.entries.values()) {
       this.closeWatcher(e)
     }
@@ -155,6 +175,11 @@ export class ExternalSessionTracker {
     if (!this.enabled || this.rescanInFlight) return
     this.rescanInFlight = true
     try {
+      // Pick up notifications even if the fs.watch missed an event, and open
+      // the watcher lazily once the hook has created the wotch dir/log.
+      await this.refreshNotifications()
+      this.openNotifWatcher()
+
       const projectDirs = this.listProjectDirs()
       const managed = this.deps.getManagedSessionIds()
 
@@ -502,10 +527,111 @@ export class ExternalSessionTracker {
   }
 
   // -------------------------------------------------------------------------
+  // Notifications (Notification-hook signal log)
+  // -------------------------------------------------------------------------
+
+  private openNotifWatcher(): void {
+    if (this.notifWatcher) return
+    // Watch the wotch dir (the log file may not exist yet — fs.watch on a
+    // missing file throws). A dir watcher fires when the log is created or
+    // appended. If the dir doesn't exist yet, this throws and we retry on the
+    // next rescan tick once the hook helper has created it.
+    try {
+      this.notifWatcher = fsWatch(WOTCH_DIR, (_event, filename) => {
+        if (filename && !String(filename).includes('notifications')) return
+        this.onNotifEvent()
+      })
+    } catch {
+      // dir not present yet — refreshNotifications() on each tick covers us
+    }
+  }
+
+  private closeNotifWatcher(): void {
+    if (this.notifDebounce) {
+      clearTimeout(this.notifDebounce)
+      this.notifDebounce = undefined
+    }
+    if (this.notifWatcher) {
+      try {
+        this.notifWatcher.close()
+      } catch {
+        // ignore
+      }
+      this.notifWatcher = undefined
+    }
+  }
+
+  private onNotifEvent(): void {
+    if (!this.enabled) return
+    if (this.notifDebounce) clearTimeout(this.notifDebounce)
+    this.notifDebounce = setTimeout(() => {
+      this.notifDebounce = undefined
+      void this.refreshNotifications().then(() => {
+        for (const e of this.entries.values()) this.maybeBroadcastUpdate(e)
+      })
+    }, 80)
+  }
+
+  /** Rebuild notifBySession from the on-disk log (latest record per session). */
+  private async refreshNotifications(): Promise<void> {
+    let text: string
+    try {
+      text = await fsp.readFile(NOTIFICATIONS_LOG, 'utf8')
+    } catch {
+      this.notifBySession.clear()
+      return
+    }
+    const map = new Map<string, NotifRecord>()
+    for (const raw of text.split(/\r?\n/)) {
+      if (!raw) continue
+      let o: Record<string, unknown>
+      try {
+        o = JSON.parse(raw) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      if (typeof o.sessionId !== 'string' || typeof o.ts !== 'number') continue
+      const type = o.type === 'permission' ? 'permission' : 'idle'
+      const prev = map.get(o.sessionId)
+      if (!prev || o.ts >= prev.ts) map.set(o.sessionId, { type, ts: o.ts })
+    }
+    this.notifBySession = map
+
+    if (text.length > NOTIF_LOG_COMPACT_BYTES) {
+      const compact =
+        Array.from(map.entries())
+          .map(([sessionId, v]) => JSON.stringify({ sessionId, type: v.type, ts: v.ts }))
+          .join('\n') + '\n'
+      try {
+        await fsp.writeFile(NOTIFICATIONS_LOG, compact, 'utf8')
+      } catch {
+        // best-effort compaction; ignore failures
+      }
+    }
+  }
+
+  /**
+   * "Needs attention" for an external session, derived from the latest hook
+   * notification vs. transcript activity:
+   *   - undefined if the process isn't live (can't interact) or no notification.
+   *   - undefined if the transcript advanced past the notification (mtime >= ts)
+   *     — the user already responded, so it self-clears.
+   *   - otherwise the notification's type ('permission' | 'idle').
+   */
+  private deriveAttention(entry: ExternalEntry): 'permission' | 'idle' | undefined {
+    if (!entry.live) return undefined
+    const n = this.notifBySession.get(entry.sessionId)
+    if (!n) return undefined
+    if (n.ts <= entry.lastModified) return undefined
+    return n.type
+  }
+
+  // -------------------------------------------------------------------------
   // Broadcast helpers
   // -------------------------------------------------------------------------
 
   private toInfo(entry: ExternalEntry): ExternalSessionInfo {
+    const attention = this.deriveAttention(entry)
     return {
       sessionId: entry.sessionId,
       hostId: entry.hostId,
@@ -521,7 +647,8 @@ export class ExternalSessionTracker {
       lastModified: entry.lastModified,
       createdAt: entry.createdAt,
       live: entry.live,
-      pid: entry.pid
+      pid: entry.pid,
+      ...(attention ? { attention } : {})
     }
   }
 

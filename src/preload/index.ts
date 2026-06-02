@@ -64,6 +64,12 @@ const api = {
     ipcRenderer.invoke(IPC.takeOverExternal, sessionId),
   getExternalTranscript: (sessionId: string): Promise<LogEntry[]> =>
     ipcRenderer.invoke(IPC.getExternalTranscript, sessionId),
+  getAttentionHook: (): Promise<{ installed: boolean }> =>
+    ipcRenderer.invoke(IPC.getAttentionHook),
+  setAttentionHook: (
+    on: boolean
+  ): Promise<{ ok: true; installed: boolean } | { ok: false; error: string }> =>
+    ipcRenderer.invoke(IPC.setAttentionHook, on),
   onTabEvent: (handler: (event: TabEvent) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, event: TabEvent): void => handler(event)
     ipcRenderer.on(IPC.tabEvent, listener)
