@@ -8,6 +8,11 @@ import {
 import icon from '../../resources/icon.png?asset'
 import { SessionManager, type CreateTabInput } from './session-manager'
 import { ExternalSessionTracker } from './external-tracker'
+import {
+  installNotificationHook,
+  isNotificationHookInstalled,
+  uninstallNotificationHook
+} from './notification-hook'
 import { IPC, type QuestionAnswer, type SessionListItem } from '../shared/protocol'
 
 // In packaged builds, __dirname lives inside app.asar — unreadable by plain
@@ -179,6 +184,21 @@ app.whenReady().then(() => {
 
   ipcMain.handle(IPC.getExternalTranscript, async (_e, sessionId: string) => {
     return externalTracker.readTranscript(sessionId)
+  })
+
+  ipcMain.handle(IPC.getAttentionHook, async () => {
+    return { installed: await isNotificationHookInstalled() }
+  })
+
+  ipcMain.handle(IPC.setAttentionHook, async (_e, on: boolean) => {
+    try {
+      if (on) await installNotificationHook()
+      else await uninstallNotificationHook()
+      return { ok: true as const, installed: on }
+    } catch (e) {
+      console.error('setAttentionHook failed', e)
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
+    }
   })
 
   ipcMain.handle(IPC.takeOverExternal, async (_e, sessionId: string) => {

@@ -178,6 +178,35 @@ export default function Dashboard({ onOpen, onNewTab }: Props): React.JSX.Elemen
     saveExternalToggle(showExternal)
   }, [showExternal])
 
+  // Attention alerts: whether the Claude Code Notification hook is installed in
+  // ~/.claude/settings.json. Opt-in — flipping it edits the user's global
+  // settings and only affects sessions started afterwards.
+  const [alertsOn, setAlertsOn] = useState(false)
+  const [alertsBusy, setAlertsBusy] = useState(false)
+  const [alertsError, setAlertsError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void window.api.getAttentionHook().then((s) => {
+      if (!cancelled) setAlertsOn(s.installed)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  const toggleAlerts = async (on: boolean): Promise<void> => {
+    setAlertsBusy(true)
+    setAlertsError(null)
+    try {
+      const r = await window.api.setAttentionHook(on)
+      if (r.ok) setAlertsOn(r.installed)
+      else setAlertsError(r.error)
+    } catch (e) {
+      setAlertsError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAlertsBusy(false)
+    }
+  }
+
   const grouped = {
     active: [] as TabState[],
     waiting: [] as TabState[],
@@ -187,7 +216,12 @@ export default function Dashboard({ onOpen, onNewTab }: Props): React.JSX.Elemen
   for (const id of order) {
     const t = tabs[id]
     if (!t) continue
-    if (t.pendingApprovals.length > 0) grouped.waiting.push(t)
+    const needsUser =
+      t.pendingApprovals.length > 0 ||
+      t.pendingQuestions.length > 0 ||
+      t.meta.status === 'awaiting_approval' ||
+      t.meta.status === 'awaiting_question'
+    if (needsUser) grouped.waiting.push(t)
     else if (t.meta.status === 'streaming' || t.meta.status === 'starting') grouped.active.push(t)
     else if (t.meta.status === 'awaiting_user') grouped.idle.push(t)
     else grouped.done.push(t)
@@ -201,9 +235,11 @@ export default function Dashboard({ onOpen, onNewTab }: Props): React.JSX.Elemen
       if (a.live !== b.live) return a.live ? -1 : 1
       return b.lastModified - a.lastModified
     })
-  const externalLive = externalEntries.filter((e) => e.live)
-  const externalRecent = externalEntries.filter((e) => !e.live)
+  const externalAttention = externalEntries.filter((e) => e.attention)
+  const externalLive = externalEntries.filter((e) => !e.attention && e.live)
+  const externalRecent = externalEntries.filter((e) => !e.attention && !e.live)
   const hiddenCount = Object.keys(external).length - externalEntries.length
+  const waitingCount = grouped.waiting.length + externalAttention.length
 
   return (
     <div className="dashboard">
@@ -213,7 +249,7 @@ export default function Dashboard({ onOpen, onNewTab }: Props): React.JSX.Elemen
           <div className="dashboard__sub">
             {total === 0
               ? 'No sessions yet.'
-              : `${total} session${total > 1 ? 's' : ''} · ${grouped.active.length} streaming · ${grouped.waiting.length} waiting on you`}
+              : `${total} session${total > 1 ? 's' : ''} · ${grouped.active.length} streaming · ${waitingCount} waiting on you`}
           </div>
         </div>
         <div className="dashboard__actions">
@@ -225,6 +261,23 @@ export default function Dashboard({ onOpen, onNewTab }: Props): React.JSX.Elemen
             />
             <span>Show external sessions</span>
           </label>
+          {showExternal && (
+            <label
+              className="toggle"
+              title={
+                'Marks external sessions that are blocked on you (a permission prompt or your turn).\n' +
+                'Installs a Notification hook in ~/.claude/settings.json. Only affects sessions started afterwards.'
+              }
+            >
+              <input
+                type="checkbox"
+                checked={alertsOn}
+                disabled={alertsBusy}
+                onChange={(e) => void toggleAlerts(e.target.checked)}
+              />
+              <span>Attention alerts</span>
+            </label>
+          )}
           <button className="btn btn--primary" onClick={onNewTab}>
             New session
           </button>
@@ -272,7 +325,14 @@ export default function Dashboard({ onOpen, onNewTab }: Props): React.JSX.Elemen
         <>
           {total > 0 && <hr className="dashboard__sep" />}
           <div className="dashboard__external">
-            {externalLive.length === 0 && externalRecent.length === 0 ? (
+            {alertsError && (
+              <div className="card__snippet card__snippet--err">
+                Attention alerts: {alertsError}
+              </div>
+            )}
+            {externalAttention.length === 0 &&
+            externalLive.length === 0 &&
+            externalRecent.length === 0 ? (
               <div className="empty">
                 <div className="empty__hint">
                   Scanning ~/.claude/projects for sessions running outside this app. None found yet
@@ -281,6 +341,17 @@ export default function Dashboard({ onOpen, onNewTab }: Props): React.JSX.Elemen
               </div>
             ) : (
               <>
+                {externalAttention.length > 0 && (
+                  <Section title="External · needs attention" tone="warn">
+                    {externalAttention.map((info) => (
+                      <ExternalCard
+                        key={info.sessionId}
+                        info={info}
+                        onTakenOver={(id) => onOpen(id)}
+                      />
+                    ))}
+                  </Section>
+                )}
                 {externalLive.length > 0 && (
                   <Section title="External · live" tone="info">
                     {externalLive.map((info) => (

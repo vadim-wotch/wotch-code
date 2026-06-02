@@ -311,6 +311,8 @@ export const IPC = {
   setExternalEnabled: 'app.setExternalEnabled',
   takeOverExternal: 'app.takeOverExternal',
   getExternalTranscript: 'app.getExternalTranscript',
+  getAttentionHook: 'app.getAttentionHook',
+  setAttentionHook: 'app.setAttentionHook',
   // event (main → renderer, fire-and-forget)
   tabEvent: 'tab.event'
 } as const
@@ -341,6 +343,11 @@ export interface ExternalSessionInfo {
   createdAt?: number
   live: boolean
   pid?: number
+  /** Set when a Claude Code Notification hook reported this session is blocked
+   *  on the user — `permission` (a tool/permission prompt) or `idle` (turn done,
+   *  waiting for the next prompt). Absent = not waiting / unknown. Cleared
+   *  automatically once the transcript advances past the notification. */
+  attention?: 'permission' | 'idle'
 }
 
 // Events broadcast from main → renderer over IPC.tabEvent
